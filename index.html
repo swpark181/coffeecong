@@ -14,17 +14,17 @@
       <div id="intro" class="overlay">
         <div class="card">
           <h2>coffeecong</h2>
-          <p class="lead">물줄기를 움직여 드립 커피를 내려보세요.</p>
+          <p class="lead">마우스로 물줄기를 움직여 15초 안에 드립 커피를 내려보세요.</p>
           <div class="recipe">
             <div><b>원두</b> 15g</div>
             <div><b>물</b> 250ml</div>
           </div>
           <ol class="howto">
-            <li><b>뜸 들이기</b> — 30~45ml로 가루 전체를 적시고 30~45초 기다리기</li>
+            <li><b>뜸 들이기</b> — 30~45ml로 가루 전체를 적시고 3~4.5초 기다리기</li>
             <li><b>2차 붓기</b> — 나선형으로 고르게, 누적 150ml까지</li>
             <li><b>3차 붓기</b> — 고인 물이 빠지면(50ml 이하) 누적 250ml까지</li>
           </ol>
-          <p class="note">Space에서 손을 떼고 2초가 지나면 그 단계가 끝나요. 필터 종이 벽에 직접 부으면 감점!</p>
+          <p class="note">왼쪽 버튼을 누르고 있으면 붓고, 오른쪽 버튼은 가늘게 부어요. 버튼을 떼면 그 단계가 끝나요. 필터 종이 벽에 직접 부으면 감점!</p>
           <button id="startBtn" type="button">시작하기 <kbd>Enter</kbd></button>
         </div>
       </div>
@@ -53,12 +53,12 @@
     <aside class="panel">
       <h1>coffeecong</h1>
       <div class="readouts">
-        <div class="readout"><span class="label">시간</span><span id="timer" class="value">0:00</span></div>
+        <div class="readout"><span class="label">시간</span><span id="timer" class="value">0.0초</span></div>
         <div class="readout"><span class="label">부은 물</span><span class="value"><span id="total">0</span><small>ml</small></span></div>
       </div>
 
       <ol id="steps" class="steps">
-        <li data-step="0"><b>뜸 들이기</b><span class="target">30~45ml · 30~45초 대기</span><span class="res"></span></li>
+        <li data-step="0"><b>뜸 들이기</b><span class="target">30~45ml · 3~4.5초 대기</span><span class="res"></span></li>
         <li data-step="1"><b>2차 붓기</b><span class="target">누적 150ml</span><span class="res"></span></li>
         <li data-step="2"><b>3차 붓기</b><span class="target">누적 250ml</span><span class="res"></span></li>
       </ol>
@@ -74,11 +74,10 @@
       <div class="readout cup"><span class="label">컵에 내려온 커피</span><span class="value"><span id="cup">0</span><small>ml</small></span></div>
 
       <dl class="keys">
-        <dt><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></dt><dd>물줄기 이동</dd>
-        <dt><kbd>Space</kbd></dt><dd>물 붓기</dd>
-        <dt><kbd>Shift</kbd>+<kbd>Space</kbd></dt><dd>가늘게 붓기</dd>
+        <dt><kbd>마우스</kbd></dt><dd>물줄기 이동</dd>
+        <dt><kbd>왼쪽 버튼</kbd></dt><dd>물 붓기</dd>
+        <dt><kbd>오른쪽 버튼</kbd></dt><dd>가늘게 붓기</dd>
         <dt><kbd>H</kbd></dt><dd>물 분포 보기</dd>
-        <dt><kbd>F</kbd></dt><dd>기다릴 때 빨리 감기</dd>
         <dt><kbd>R</kbd></dt><dd>처음부터</dd>
       </dl>
     </aside>

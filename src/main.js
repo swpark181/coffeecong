@@ -7,23 +7,25 @@
   const CFG = {
     coffeeG: 15,
     absorbPerG: 2,        // 원두가 머금고 내보내지 않는 물 (g당 ml)
-    pourRate: 5,          // ml/s
-    gentleRate: 2.5,      // Shift 누르고 붓기
+    // 실제 드립(약 2분 30초)을 15초 안팎으로 압축한 시간값
+    pourRate: 35,         // ml/s
+    gentleRate: 15,       // 오른쪽 버튼(또는 Shift+클릭)으로 가늘게 붓기
     maxTotal: 400,
     grid: 72,             // 커피 베드 시뮬레이션 격자 (N x N)
     bedR: 0.78,           // 커피 가루 표면 반지름. 바깥은 필터 종이 벽
     evalR: 0.70,          // 고르게 붓기 평가 영역
     sigma: 0.1,           // 물줄기가 퍼지는 반경
-    maxSpeed: 1.2,        // 물줄기 이동 속도 (R/s)
-    response: 7,          // 클수록 관성이 적음
-    drainK: 0.07,         // 고인 물이 빠지는 속도
-    drainC: 0.4,
-    stageGap: 2,          // Space를 떼고 이 시간이 지나면 단계 종료
+    follow: 25,           // 물줄기가 마우스를 따라가는 빠르기 (클수록 즉각적)
+    drainK: 0.7,          // 고인 물이 빠지는 속도
+    drainC: 4,
+    drawdownBoost: 3,     // 마지막 붓기 후에는 더 빨리 빠지게
+    gasTau: 1.6,          // 뜸 거품이 잦아드는 시간
+    stageGap: 0.6,        // 버튼을 떼고 이 시간이 지나면 단계 종료
     minStageAmount: 3,
     bloom: [30, 45],
-    bloomWait: [30, 45],
-    second: [142, 158],
-    final: [245, 255],
+    bloomWait: [3, 4.5],
+    second: [140, 160],
+    final: [244, 256],
     thirdWindow: [15, 50],
     gaugeMax: 150,
   };
@@ -72,23 +74,52 @@
   ui.freeBand.style.left = `${(CFG.thirdWindow[0] / CFG.gaugeMax) * 100}%`;
   ui.freeBand.style.width = `${((CFG.thirdWindow[1] - CFG.thirdWindow[0]) / CFG.gaugeMax) * 100}%`;
 
+  // 캔버스 픽셀 기준 드리퍼 위치와 크기. 그리기와 마우스 좌표 변환이 함께 쓴다.
+  function layout(W) {
+    return { cx: W / 2, cy: W / 2 + W * 0.03, R: W * 0.37 };
+  }
+
   // ---------------------------------------------------------------------------
-  // 입력 (한글 입력 상태에서도 동작하도록 e.code 사용)
+  // 입력: 물줄기는 마우스를 따라가고, 왼쪽 버튼 = 붓기, 오른쪽 버튼 = 가늘게 붓기
+  // (키보드는 한글 입력 상태에서도 동작하도록 e.code 사용)
   // ---------------------------------------------------------------------------
-  const keys = new Set();
-  const GAME_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
-  const down = code => keys.has(code);
+  const pointer = { x: 0, y: 0, left: false, right: false, shift: false };
+  const isPouringInput = () => pointer.left || pointer.right;
+  const isGentle = () => pointer.right || pointer.shift;
+
+  function trackPointer(e) {
+    const rect = canvas.getBoundingClientRect();
+    const scale = canvas.width / rect.width;
+    const { cx, cy, R } = layout(canvas.width);
+    pointer.x = ((e.clientX - rect.left) * scale - cx) / R;
+    pointer.y = ((e.clientY - rect.top) * scale - cy) / R;
+  }
+
+  canvas.addEventListener('pointermove', trackPointer);
+  canvas.addEventListener('pointerdown', e => {
+    trackPointer(e);
+    if (e.button === 0) pointer.left = true;
+    if (e.button === 2) pointer.right = true;
+    pointer.shift = e.shiftKey;
+    try { canvas.setPointerCapture(e.pointerId); } catch (_) { /* 캡처 실패해도 진행 */ }
+    e.preventDefault();
+  });
+  addEventListener('pointerup', e => {
+    if (e.button === 0) pointer.left = false;
+    if (e.button === 2) pointer.right = false;
+  });
+  addEventListener('pointercancel', () => { pointer.left = pointer.right = false; });
+  canvas.addEventListener('contextmenu', e => e.preventDefault());
 
   addEventListener('keydown', e => {
-    if (GAME_KEYS.has(e.code)) e.preventDefault();
+    if (e.key === 'Shift') pointer.shift = true;
     if (e.repeat) return;
-    keys.add(e.code);
     if (e.code === 'Enter' && G.state === 'intro') start();
     else if (e.code === 'KeyR' && G.state !== 'intro') restart();
     else if (e.code === 'KeyH') G.heat = !G.heat;
   });
-  addEventListener('keyup', e => keys.delete(e.code));
-  addEventListener('blur', () => keys.clear());
+  addEventListener('keyup', e => { if (e.key === 'Shift') pointer.shift = false; });
+  addEventListener('blur', () => { pointer.left = pointer.right = pointer.shift = false; });
   $('startBtn').addEventListener('click', start);
   $('againBtn').addEventListener('click', restart);
 
@@ -104,7 +135,7 @@
       t: 0,
       stage: 0,              // 0 뜸, 1 2차, 2 3차
       sub: 'waiting',        // 'waiting' | 'pouring' | 'drawdown'
-      sx: 0, sy: 0, vx: 0, vy: 0,
+      sx: 0, sy: 0,
       pouring: false,
       total: 0, bedTotal: 0, bypass: 0, drained: 0, cup: 0, free: 0,
       lastPour: 0,
@@ -140,25 +171,15 @@
   // ---------------------------------------------------------------------------
   // 시뮬레이션
   // ---------------------------------------------------------------------------
+  // 주전자 물줄기라 마우스를 아주 살짝 늦게 따라간다.
   function updateMovement(dt) {
-    let ix = (down('KeyD') || down('ArrowRight') ? 1 : 0) - (down('KeyA') || down('ArrowLeft') ? 1 : 0);
-    let iy = (down('KeyS') || down('ArrowDown') ? 1 : 0) - (down('KeyW') || down('ArrowUp') ? 1 : 0);
-    const len = Math.hypot(ix, iy);
-    if (len > 0) { ix /= len; iy /= len; }
-    const a = Math.min(1, dt * CFG.response);
-    G.vx += (ix * CFG.maxSpeed - G.vx) * a;
-    G.vy += (iy * CFG.maxSpeed - G.vy) * a;
-    G.sx += G.vx * dt;
-    G.sy += G.vy * dt;
-    const r = Math.hypot(G.sx, G.sy);
+    let tx = pointer.x, ty = pointer.y;
+    const r = Math.hypot(tx, ty);
     const maxR = 0.97;
-    if (r > maxR) {
-      const nx = G.sx / r, ny = G.sy / r;
-      G.sx = nx * maxR;
-      G.sy = ny * maxR;
-      const vr = G.vx * nx + G.vy * ny;
-      if (vr > 0) { G.vx -= vr * nx; G.vy -= vr * ny; }
-    }
+    if (r > maxR) { tx *= maxR / r; ty *= maxR / r; }
+    const a = 1 - Math.exp(-dt * CFG.follow);
+    G.sx += (tx - G.sx) * a;
+    G.sy += (ty - G.sy) * a;
   }
 
   // 물줄기 위치를 중심으로 가우시안 분포로 물을 뿌린다.
@@ -254,12 +275,12 @@
 
   function simulate(dt) {
     const canPour = G.sub !== 'drawdown' && G.total < CFG.maxTotal;
-    G.pouring = canPour && down('Space');
+    G.pouring = canPour && isPouringInput();
 
     if (G.pouring) {
       G.started = true;
       if (G.sub === 'waiting') beginStage();
-      const rate = down('ShiftLeft') || down('ShiftRight') ? CFG.gentleRate : CFG.pourRate;
+      const rate = isGentle() ? CFG.gentleRate : CFG.pourRate;
       const a = Math.min(rate * dt, CFG.maxTotal - G.total);
       deposit(a);
       G.total += a;
@@ -276,7 +297,8 @@
     const absorbed = Math.min(G.bedTotal, CFG.coffeeG * CFG.absorbPerG);
     let free = Math.max(0, G.bedTotal - absorbed - G.drained);
     if (free > 0) {
-      const d = Math.min(free, (CFG.drainK * free + CFG.drainC) * dt);
+      const boost = G.sub === 'drawdown' ? CFG.drawdownBoost : 1;
+      const d = Math.min(free, (CFG.drainK * free + CFG.drainC) * boost * dt);
       G.drained += d;
       G.cup += d;
       free -= d;
@@ -288,7 +310,7 @@
 
     // 젖은 가루에서 가스가 빠져나가며 뜸 거품이 생긴다.
     const freshDecay = Math.exp(-dt * 1.5);
-    const gasDecay = Math.exp(-dt / 14);
+    const gasDecay = Math.exp(-dt / CFG.gasTau);
     for (const k of bedList) {
       G.fresh[k] *= freshDecay;
       if (wetness(k) > 0.3) G.gas[k] *= gasDecay;
@@ -342,18 +364,18 @@
     let third;
     const [lo, hi] = CFG.thirdWindow;
     if (G.thirdFree > hi) third = clamp(100 - (G.thirdFree - hi) * 2);
-    else if (G.thirdFree < lo) third = clamp(100 - (lo - G.thirdFree) * 3 - G.thirdDry * 4);
+    else if (G.thirdFree < lo) third = clamp(100 - (lo - G.thirdFree) * 3 - G.thirdDry * 40);
     else third = 100;
 
     const items = [
       { key: 'even', label: '고르게 붓기', w: 25, score: even },
       { key: 'edge', label: '필터 벽 피하기', w: 10, score: clamp(100 - bypassRatio * 800), detail: `벽 ${Math.round(G.bypass)}ml` },
-      { key: 'bloomAmt', label: '뜸 물 양', w: 10, score: band(b.amount, CFG.bloom, 4), detail: `${Math.round(b.amount)}ml` },
+      { key: 'bloomAmt', label: '뜸 물 양', w: 10, score: band(b.amount, CFG.bloom, 3), detail: `${Math.round(b.amount)}ml` },
       { key: 'coverage', label: '뜸 커버리지', w: 10, score: clamp(((b.coverage - 0.6) / 0.35) * 100), detail: `${Math.round(b.coverage * 100)}%` },
-      { key: 'bloomWait', label: '뜸 시간', w: 10, score: band(G.bloomWait, CFG.bloomWait, 5), detail: `${Math.round(G.bloomWait)}초` },
-      { key: 'second', label: '2차 붓기 양', w: 10, score: band(s2.cum, CFG.second, 3), detail: `누적 ${Math.round(s2.cum)}ml` },
+      { key: 'bloomWait', label: '뜸 시간', w: 10, score: band(G.bloomWait, CFG.bloomWait, 50), detail: `${G.bloomWait.toFixed(1)}초` },
+      { key: 'second', label: '2차 붓기 양', w: 10, score: band(s2.cum, CFG.second, 2), detail: `누적 ${Math.round(s2.cum)}ml` },
       { key: 'third', label: '3차 타이밍', w: 10, score: third, detail: `고인 물 ${Math.round(G.thirdFree)}ml` },
-      { key: 'final', label: '최종 물 양', w: 15, score: band(s3.cum, CFG.final, 3), detail: `${Math.round(s3.cum)}ml` },
+      { key: 'final', label: '최종 물 양', w: 15, score: band(s3.cum, CFG.final, 2), detail: `${Math.round(s3.cum)}ml` },
     ];
     const total = items.reduce((acc, it) => acc + (it.w * it.score) / 100, 0);
     return { items, total, even };
@@ -363,8 +385,8 @@
     even: '물이 한 곳에 몰렸어요. 중심에서 바깥으로 나선을 그리며 베드 전체에 골고루 부어보세요.',
     edge: '필터 종이 벽에 직접 부은 물은 커피를 거치지 않고 빠져요. 가루 표면 안쪽에만 부어주세요.',
     bloomAmt: '뜸 물은 원두 무게의 2~3배(30~45ml)가 적당해요.',
-    coverage: '뜸 들일 때 마른 가루가 남았어요. Shift+Space로 가늘게 부으며 전체를 적셔보세요.',
-    bloomWait: '뜸은 30~45초 기다린 뒤 2차 붓기를 시작하세요.',
+    coverage: '뜸 들일 때 마른 가루가 남았어요. 오른쪽 버튼으로 가늘게 부으며 전체를 적셔보세요.',
+    bloomWait: '뜸은 3~4.5초 기다린 뒤 2차 붓기를 시작하세요.',
     second: '2차 붓기는 누적 150ml에서 멈추세요. 오른쪽 "부은 물"을 확인!',
     third: '3차 붓기는 고인 물이 15~50ml일 때(게이지 초록 구간) 시작하세요.',
     final: '최종 물 양은 250ml. 끝날 즈음엔 가늘게 부어 양을 맞춰보세요.',
@@ -475,8 +497,7 @@
 
   function draw() {
     const W = canvas.width;
-    const cx = W / 2, cy = W / 2 + W * 0.03;
-    const R = W * 0.37;
+    const { cx, cy, R } = layout(W);
     const X = x => cx + x * R;
     const Y = y => cy + y * R;
     const bedPx = CFG.bedR * R;
@@ -593,7 +614,7 @@
       ctx.arc(sx, sy, R * 0.1, 0, Math.PI * 2);
       ctx.fill();
       ctx.beginPath();
-      ctx.arc(sx + wob, sy, R * (down('ShiftLeft') || down('ShiftRight') ? 0.016 : 0.026), 0, Math.PI * 2);
+      ctx.arc(sx + wob, sy, R * (isGentle() ? 0.016 : 0.026), 0, Math.PI * 2);
       ctx.fillStyle = '#eef8ff';
       ctx.fill();
     } else {
@@ -669,7 +690,7 @@
     if (G.state !== 'play') return null;
     const s = G.stage;
     const ml = v => `${Math.round(v)}ml`;
-    if (!G.started) return ['Space를 눌러 뜸 물을 부으세요', 'WASD로 물줄기 이동 · 목표 30~45ml로 가루 전체 적시기'];
+    if (!G.started) return ['클릭한 채로 움직여 뜸 물을 부으세요', '목표 30~45ml로 가루 전체 적시기 · 오른쪽 버튼은 가늘게'];
 
     if (G.sub === 'pouring') {
       const gap = G.t - G.lastPour;
@@ -682,27 +703,26 @@
     if (G.sub === 'waiting' && s === 1) {
       const w = G.t - G.stages[0].end;
       const [lo, hi] = CFG.bloomWait;
-      if (w < lo) return [`뜸 들이는 중… ${Math.floor(w)}초`, `${lo}~${hi}초 기다린 뒤 2차 붓기 · F로 빨리 감기`];
-      if (w <= hi) return ['지금 2차 붓기!', `뜸 ${Math.floor(w)}초 · 누적 150ml까지`, 'go'];
-      return [`뜸이 길어지고 있어요 (${Math.floor(w)}초)`, '바로 2차 붓기를 시작하세요', 'warn'];
+      if (w < lo) return [`뜸 들이는 중… ${w.toFixed(1)}초`, `${lo}~${hi}초 기다린 뒤 2차 붓기`];
+      if (w <= hi) return ['지금 2차 붓기!', `뜸 ${w.toFixed(1)}초 · 누적 150ml까지`, 'go'];
+      return [`뜸이 길어지고 있어요 (${w.toFixed(1)}초)`, '바로 2차 붓기를 시작하세요', 'warn'];
     }
 
     if (G.sub === 'waiting' && s === 2) {
       const [lo, hi] = CFG.thirdWindow;
-      if (G.free > hi) return ['물이 빠지길 기다리세요', `고인 물 ${ml(G.free)} · ${hi}ml 이하에서 3차 시작 · F로 빨리 감기`];
+      if (G.free > hi) return ['물이 빠지길 기다리세요', `고인 물 ${ml(G.free)} · ${hi}ml 이하에서 3차 시작`];
       if (G.free >= lo) return ['지금 3차 붓기!', `고인 물 ${ml(G.free)} · 누적 250ml까지`, 'go'];
       return ['물이 거의 다 빠졌어요!', '서둘러 3차 붓기를 시작하세요', 'warn'];
     }
 
-    return ['추출 마무리 중…', `컵 ${ml(G.cup)} · F를 누르고 있으면 빨리 감기`];
+    return ['추출 마무리 중…', `컵 ${ml(G.cup)}`];
   }
 
   // ---------------------------------------------------------------------------
   // 패널
   // ---------------------------------------------------------------------------
   function fmtTime(t) {
-    const s = Math.floor(t);
-    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+    return `${t.toFixed(1)}초`;
   }
 
   function updatePanel() {
@@ -732,8 +752,7 @@
     resize();
     if (G.state === 'play') {
       updateMovement(dt);
-      const fast = down('KeyF') && !down('Space') && G.started ? 5 : 1;
-      for (let i = 0; i < fast && G.state === 'play'; i++) simulate(dt);
+      simulate(dt);
     }
     draw();
     updatePanel();
